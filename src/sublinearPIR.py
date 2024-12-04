@@ -6,6 +6,7 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 
+
 class PIRServer:
     def __init__(self, database: List[int]):
         self.database = np.array(database)
@@ -166,10 +167,10 @@ class PuncturablePRF:
     def eval(self, x: int) -> int:
         """Evaluate PRF at point x"""
         if not 0 <= x < self.size:
-            raise ValueError(f"Input {x} out of range [0, {self.size})")
-
-        h = hashlib.sha256(self.key + x.to_bytes(4, 'big')).digest()
-        return int.from_bytes(h[:4], 'big') % self.size
+            # Instead of raising error, use modulo to keep within range
+            x = x % self.size
+            h = hashlib.sha256(self.key + x.to_bytes(4, 'big')).digest()
+            return int.from_bytes(h[:4], 'big') % self.size
 
     def punc(self, x: int) -> 'PuncturablePRF':
         """Create punctured key that can't evaluate at x"""
@@ -224,5 +225,3 @@ def test_simple_pir():
         if attempts == max_attempts:
             logging.info(
                 f"Failed to retrieve index {test_i} after {max_attempts} attempts")
-
-
