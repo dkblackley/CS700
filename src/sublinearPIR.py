@@ -13,7 +13,9 @@ class PIRServer:
 
     def answer_query(self, query: 'ServerQuery') -> int:
         """Answer a PIR query by computing parity of accessed elements"""
+
         indices = query.punctured_set.eval()
+        # logging.info(f"{query} {indices}!!!!!!!!!!!!!!!!")
         result = sum(self.database[i] for i in indices) % 2
         logging.info(
             f"Server computing parity for indices {sorted(indices)}: {result}")
@@ -122,17 +124,24 @@ class PseudorandomSet:
 
         elements = set()
         attempt = 0
-        while len(
-                elements - self.excluded_elements) < self.set_size and attempt < self.size * 2:
+        # Keep trying until we have enough valid elements or hit the limit
+        while len(elements - self.excluded_elements) < self.set_size and attempt < self.size * 2:
             val = self.prf.eval(attempt)
-            if val not in self.excluded_elements:
+            # Only add if val is valid and not excluded
+            if val is not None and val not in self.excluded_elements:
                 elements.add(val)
             attempt += 1
 
         result = elements - self.excluded_elements
+
+        # If we don't have enough elements, raise an error
+        if len(result) < self.set_size:
+            raise ValueError(f"Could not generate enough valid elements. Got {len(result)}, needed {self.set_size}")
+
         # Ensure we have exactly set_size elements
         if len(result) > self.set_size:
             result = set(sorted(list(result))[:self.set_size])
+
         return result
 
     def punc(self, element: int) -> 'PseudorandomSet':

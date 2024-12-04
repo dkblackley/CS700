@@ -10,6 +10,7 @@ from dataclasses import dataclass
 import logging
 from sublinearPIR import PIRServer, PIRClient, ServerQuery
 import secrets
+import traceback
 import hashlib
 
 logging.basicConfig(level=logging.INFO)
@@ -82,7 +83,8 @@ class SocketPIRServer:
                 self._send_data(conn, result)
 
         except Exception as e:
-            logging.error(f"Error handling client: {e}")
+            logging.error(f"Error handling client: {e}, {traceback.format_exc()}")
+            
         finally:
             self.stats.time_ended = time.time()
             conn.close()
