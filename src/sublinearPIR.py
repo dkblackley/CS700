@@ -4,6 +4,7 @@ import numpy as np
 from typing import List, Optional, Set
 import logging
 
+logging.basicConfig(level=logging.INFO)
 
 class PIRServer:
     def __init__(self, database: List[int]):
@@ -225,5 +226,3 @@ def test_simple_pir():
                 f"Failed to retrieve index {test_i} after {max_attempts} attempts")
 
 
-if __name__ == "__main__":
-    test_simple_pir()

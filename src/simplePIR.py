@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Tuple, List
 import logging
 
+logging.basicConfig(level=logging.INFO)
 
 @dataclass
 class PIRParams:
