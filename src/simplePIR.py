@@ -1,6 +1,7 @@
 import numpy as np
 from dataclasses import dataclass
 from typing import Tuple, List
+import logging
 
 
 @dataclass
@@ -28,20 +29,21 @@ class SimplePIR:
 
     def setup(self, db: np.ndarray) -> Tuple[None, np.ndarray]:
         """Setup phase of SimplePIR"""
-        print("\n=== Setup Phase ===")
-        print(f"Database shape: {db.shape}")
-        print(f"Database min/max values: {np.min(db)}/{np.max(db)}")
+        logging.info("\n=== Setup Phase ===")
+        logging.info(f"Database shape: {db.shape}")
+        logging.info(f"Database min/max values: {np.min(db)}/{np.max(db)}")
 
         sqrt_N = db.shape[0]
         # Sample random matrix A
         self.A = np.random.randint(0, self.params.q, (sqrt_N, self.params.n))
-        print(f"A matrix shape: {self.A.shape}")
-        print(f"A matrix min/max values: {np.min(self.A)}/{np.max(self.A)}")
+        logging.info(f"A matrix shape: {self.A.shape}")
+        logging.info(
+            f"A matrix min/max values: {np.min(self.A)}/{np.max(self.A)}")
 
         # Compute hint = DB · A
         client_hint = np.mod(db @ self.A, self.params.q)
-        print(f"Client hint shape: {client_hint.shape}")
-        print(
+        logging.info(f"Client hint shape: {client_hint.shape}")
+        logging.info(
             f"Client hint min/max values: {np.min(client_hint)}/{np.max(client_hint)}")
 
         return None, client_hint
@@ -53,19 +55,19 @@ class SimplePIR:
                                                   np.ndarray],
                                             np.ndarray]:
         """Generate query for index i"""
-        print("\n=== Query Phase ===")
+        logging.info("\n=== Query Phase ===")
         sqrt_N = db_dims[0]
         i_row, i_col = i // sqrt_N, i % sqrt_N
-        print(f"Querying index {i} (row={i_row}, col={i_col})")
+        logging.info(f"Querying index {i} (row={i_row}, col={i_col})")
 
         # Sample secret and error
         s = np.random.randint(0, self.params.q, self.params.n)
-        print(f"Secret s shape: {s.shape}")
-        print(f"Secret s min/max values: {np.min(s)}/{np.max(s)}")
+        logging.info(f"Secret s shape: {s.shape}")
+        logging.info(f"Secret s min/max values: {np.min(s)}/{np.max(s)}")
 
         e = self._sample_gaussian((sqrt_N,))
-        print(f"Error e shape: {e.shape}")
-        print(f"Error e min/max values: {np.min(e)}/{np.max(e)}")
+        logging.info(f"Error e shape: {e.shape}")
+        logging.info(f"Error e min/max values: {np.min(e)}/{np.max(e)}")
 
         # Generate unit vector
         u = np.zeros(sqrt_N)
@@ -77,9 +79,10 @@ class SimplePIR:
                 0, self.params.q, (sqrt_N, self.params.n))
 
         query = np.mod(self.A @ s + e + self.params.delta * u, self.params.q)
-        print(f"Query vector shape: {query.shape}")
-        print(f"Query vector min/max values: {np.min(query)}/{np.max(query)}")
-        print(f"Delta value: {self.params.delta}")
+        logging.info(f"Query vector shape: {query.shape}")
+        logging.info(
+            f"Query vector min/max values: {np.min(query)}/{np.max(query)}")
+        logging.info(f"Delta value: {self.params.delta}")
 
         return (i_row, s), query
 
@@ -89,59 +92,59 @@ class SimplePIR:
             server_hint: None,
             query: np.ndarray) -> np.ndarray:
         """Server's answer computation"""
-        print("\n=== Answer Phase ===")
+        logging.info("\n=== Answer Phase ===")
         # Compute DB · query
         answer = np.mod(db @ query, self.params.q)
-        print(f"Answer vector shape: {answer.shape}")
-        print(
+        logging.info(f"Answer vector shape: {answer.shape}")
+        logging.info(
             f"Answer vector min/max values: {np.min(answer)}/{np.max(answer)}")
         return answer
 
     def recover(self, state: Tuple[int, np.ndarray], client_hint: np.ndarray,
                 answer: np.ndarray, params: PIRParams) -> int:
         """Recover the requested database element"""
-        print("\n=== Recovery Phase ===")
+        logging.info("\n=== Recovery Phase ===")
         i_row, s = state
 
         # Compute answer[i_row] - client_hint[i_row] · s
         hint_part = np.mod(client_hint[i_row] @ s, self.params.q)
         answer_part = answer[i_row]
-        print(f"Answer part value: {answer_part}")
-        print(f"Hint part value: {hint_part}")
+        logging.info(f"Answer part value: {answer_part}")
+        logging.info(f"Hint part value: {hint_part}")
 
         noised = answer_part - hint_part
         noised = noised % self.params.q
-        print(f"Noised value: {noised}")
+        logging.info(f"Noised value: {noised}")
 
         # Round to nearest multiple of Δ
         delta = self.params.delta
         denoised = round(noised / delta) * delta
-        print(f"Denoised value: {denoised}")
+        logging.info(f"Denoised value: {denoised}")
         result = (denoised // delta) % self.params.p
-        print(f"Final result (mod p): {result}")
+        logging.info(f"Final result (mod p): {result}")
 
         return result
 
 
 # Example usage:
 if __name__ == "__main__":
-    print("=== SimplePIR Parameters ===")
+    logging.info("=== SimplePIR Parameters ===")
     params = PIRParams(
         n=1024,  # LWE dimension
         q=2**32,  # Ciphertext modulus
         p=991,   # Plaintext modulus
         sigma=6.4  # Gaussian parameter
     )
-    print(f"n: {params.n}")
-    print(f"q: {params.q}")
-    print(f"p: {params.p}")
-    print(f"sigma: {params.sigma}")
-    print(f"delta: {params.delta}")
+    logging.info(f"n: {params.n}")
+    logging.info(f"q: {params.q}")
+    logging.info(f"p: {params.p}")
+    logging.info(f"sigma: {params.sigma}")
+    logging.info(f"delta: {params.delta}")
 
     pir = SimplePIR(params)
 
     # Create example database
-    N = 1024  # Total DB size
+    N = 1024 * 100  # Total DB size
     sqrt_N = int(np.sqrt(N))
     db = np.random.randint(0, params.p, (sqrt_N, sqrt_N))
 
@@ -162,7 +165,7 @@ if __name__ == "__main__":
 
     # Verify correctness
     i_row, i_col = i // sqrt_N, i % sqrt_N
-    print("\n=== Final Results ===")
-    print(f"Retrieved value: {result}")
-    print(f"Actual value: {db[i_row, i_col]}")
-    print(f"Correct: {result == db[i_row, i_col]}")
+    logging.info("\n=== Final Results ===")
+    logging.info(f"Retrieved value: {result}")
+    logging.info(f"Actual value: {db[i_row, i_col]}")
+    logging.info(f"Correct: {result == db[i_row, i_col]}")
