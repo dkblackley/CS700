@@ -1,4 +1,5 @@
 ### pir_socket_server.py ###
+from typing import Optional, List
 import socket
 import pickle
 import time
@@ -12,6 +13,7 @@ import secrets
 import hashlib
 
 logging.basicConfig(level=logging.INFO)
+
 
 @dataclass
 class NetworkStats:
@@ -27,6 +29,7 @@ class NetworkStats:
             return 0.0, 0.0
         return self.bytes_sent / duration, self.bytes_received / duration
 
+
 class SocketPIRServer:
     def __init__(self, host: str = 'localhost', port: int = 12345):
         self.host = host
@@ -34,7 +37,7 @@ class SocketPIRServer:
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.stats = NetworkStats()
-        
+
     def initialize_database(self, size: int) -> List[int]:
         """Initialize random database of given size"""
         return [np.random.randint(0, 2) for _ in range(size)]
@@ -44,7 +47,7 @@ class SocketPIRServer:
         self.socket.bind((self.host, self.port))
         self.socket.listen(1)
         logging.info(f"Server listening on {self.host}:{self.port}")
-        
+
         while True:
             conn, addr = self.socket.accept()
             logging.info(f"Connected by {addr}")
@@ -61,7 +64,7 @@ class SocketPIRServer:
             size = self._receive_data(conn)
             database = self.initialize_database(size)
             pir_server = PIRServer(database)
-            
+
             # Send acknowledgment
             self._send_data(conn, "ready")
 
@@ -74,7 +77,7 @@ class SocketPIRServer:
                 # Process query
                 query = ServerQuery(data['punctured_set'])
                 result = pir_server.answer_query(query)
-                
+
                 # Send result
                 self._send_data(conn, result)
 
@@ -121,14 +124,11 @@ Upload Rate: {upload_rate:.2f} bytes/second
 Download Rate: {download_rate:.2f} bytes/second
 """)
 
+
 ### pir_socket_client.py ###
-import socket
-import pickle
-import time
-from typing import Optional, List
-import logging
 
 logging.basicConfig(level=logging.INFO)
+
 
 class SocketPIRClient:
     def __init__(self, host: str = 'localhost', port: int = 12345):
@@ -136,7 +136,7 @@ class SocketPIRClient:
         self.port = port
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.stats = NetworkStats()
-        
+
     def connect(self):
         """Connect to PIR server"""
         self.socket.connect((self.host, self.port))
@@ -157,7 +157,10 @@ class SocketPIRClient:
             raise RuntimeError("Failed to initialize PIR")
         self.pir_client = PIRClient(n)
 
-    def retrieve_bit(self, index: int, max_attempts: int = 10) -> Optional[int]:
+    def retrieve_bit(
+            self,
+            index: int,
+            max_attempts: int = 10) -> Optional[int]:
         """Retrieve bit at given index"""
         # Execute offline phase
         hints = []
@@ -177,7 +180,9 @@ class SocketPIRClient:
                 if index not in elements:
                     continue
 
-                b = secrets.randbelow(self.pir_client.n) < (self.pir_client.sqrt_n - 1)
+                b = secrets.randbelow(
+                    self.pir_client.n) < (
+                    self.pir_client.sqrt_n - 1)
                 if b == 0:
                     punced_set = set_key.punc(index)
                     self._send_data({"punctured_set": punced_set})
@@ -188,13 +193,14 @@ class SocketPIRClient:
                     elements_list = list(elements - {index})
                     if not elements_list:
                         continue
-                    rand_elem = elements_list[secrets.randbelow(len(elements_list))]
+                    rand_elem = elements_list[secrets.randbelow(
+                        len(elements_list))]
                     punced_set = set_key.punc(rand_elem)
                     self._send_data({"punctured_set": punced_set})
                     self._receive_data()  # Discard result
-                    
+
             attempts += 1
-            
+
         return None
 
     def _send_data(self, data) -> None:
@@ -210,6 +216,7 @@ class SocketPIRClient:
         size_bytes = self.socket.recv(8)
         size = int.from_bytes(size_bytes, 'big')
         data = b''
+        logging.info(f"AAAAAAAAA{size_bytes}, {size}, {len(data)}")
         while len(data) < size:
             chunk = self.socket.recv(min(size - len(data), 4096))
             if not chunk:
@@ -232,6 +239,8 @@ Download Rate: {download_rate:.2f} bytes/second
 """)
 
 ### test_pir_socket.py ###
+
+
 def test_socket_pir():
     # Start server in a separate process
     from multiprocessing import Process
@@ -263,6 +272,7 @@ def test_socket_pir():
         client.close()
         server_process.terminate()
         server_process.join()
+
 
 if __name__ == "__main__":
     test_socket_pir()

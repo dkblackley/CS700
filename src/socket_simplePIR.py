@@ -10,6 +10,21 @@ from simplePIR import PIRParams, SimplePIR
 logging.basicConfig(level=logging.INFO)
 
 
+@dataclass
+class NetworkStats:
+    bytes_sent: int = 0
+    bytes_received: int = 0
+    time_started: float = 0
+    time_ended: float = 0
+
+    def get_data_rate(self) -> Tuple[float, float]:
+        """Returns (upload_rate, download_rate) in bytes/second"""
+        duration = self.time_ended - self.time_started
+        if duration == 0:
+            return 0.0, 0.0
+        return self.bytes_sent / duration, self.bytes_received / duration
+
+
 class PIRServer:
     def __init__(self, host='localhost', port=12345):
         self.host = host
@@ -18,6 +33,7 @@ class PIRServer:
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.db = None
         self.pir = None
+        self.stats = NetworkStats()
 
     def initialize_database(self, params: PIRParams, N: int):
         """Initialize database with random values"""
@@ -36,10 +52,12 @@ class PIRServer:
         while True:
             conn, addr = self.socket.accept()
             logging.info(f"Connected by {addr}")
+            self.stats = NetworkStats()
+            self.stats.time_started = time.time()
 
             try:
                 while True:
-                    _, cmd = self.receive_data(conn)
+                    size, cmd = self._receive_data(conn)
                     if cmd == "setup":
                         self.handle_setup(conn)
                     elif cmd == "answer":
@@ -49,11 +67,12 @@ class PIRServer:
             except ConnectionResetError:
                 logging.info("Client disconnected")
             finally:
+                self.stats.time_ended = time.time()
                 conn.close()
+                self._log_stats()
 
     def handle_setup(self, conn):
         """Handle setup phase"""
-        start_time = time.time()
         _, client_hint = self.pir.setup(self.db)
 
         setup_data = {
@@ -61,47 +80,47 @@ class PIRServer:
             'client_hint': client_hint
         }
 
-        data_size = self.send_data(conn, setup_data)
-
-        end_time = time.time()
-        duration = end_time - start_time
-        data_rate = data_size / duration / 1024 / 1024  # MB/s
-
-        logging.info(f"Setup completed in {duration:.2f}s")
-        logging.info(f"Setup data rate: {data_rate:.2f} MB/s")
+        self._send_data(conn, setup_data)
 
     def handle_answer(self, conn):
         """Handle answer phase"""
-        query = self.receive_data(conn)
-
-        start_time = time.time()
+        _, query = self._receive_data(conn)
         answer = self.pir.answer(self.db, None, query)
+        self._send_data(conn, answer)
 
-        data_size = self.send_data(conn, answer)
-
-        end_time = time.time()
-        duration = end_time - start_time
-        data_rate = data_size / duration / 1024 / 1024  # MB/s
-
-        logging.info(f"Query answered in {duration:.2f}s")
-        logging.info(f"Answer data rate: {data_rate:.2f} MB/s")
-
-    def send_data(self, conn, data) -> int:
+    def _send_data(self, conn, data) -> None:
+        """Send data with size tracking"""
         serialized = pickle.dumps(data, protocol=4)
         size = len(serialized)
         conn.sendall(len(serialized).to_bytes(8, 'big'))
         conn.sendall(serialized)
-        return size
+        self.stats.bytes_sent += size + 8
 
-    def receive_data(self, conn):
-        size = int.from_bytes(conn.recv(8), 'big')
+    def _receive_data(self, conn):
+        """Receive data with size tracking"""
+        size_bytes = conn.recv(8)
+        size = int.from_bytes(size_bytes, 'big')
         data = bytearray()
         while len(data) < size:
-            packet = conn.recv(min(size - len(data), 4096))
-            if not packet:
+            chunk = conn.recv(min(size - len(data), 4096))
+            if not chunk:
                 raise ConnectionResetError()
-            data.extend(packet)
+            data.extend(chunk)
+        self.stats.bytes_received += len(data) + 8
         return size, pickle.loads(bytes(data))
+
+    def _log_stats(self):
+        """Log network statistics"""
+        upload_rate, download_rate = self.stats.get_data_rate()
+        duration = self.stats.time_ended - self.stats.time_started
+        logging.info(f"""
+Connection Statistics:
+Duration: {duration:.2f} seconds
+Total Bytes Sent: {self.stats.bytes_sent}
+Total Bytes Received: {self.stats.bytes_received}
+Upload Rate: {upload_rate:.2f} bytes/second
+Download Rate: {download_rate:.2f} bytes/second
+""")
 
 
 class PIRClient:
@@ -111,10 +130,12 @@ class PIRClient:
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.pir = None
         self.client_hint = None
+        self.stats = NetworkStats()
 
     def connect(self):
         """Connect to PIR server"""
         self.socket.connect((self.host, self.port))
+        self.stats.time_started = time.time()
 
     def initialize(self, params: PIRParams):
         """Initialize PIR client"""
@@ -122,55 +143,41 @@ class PIRClient:
 
     def query_index(self, i: int, db_dims: Tuple[int, int]) -> int:
         """Query database for index i"""
-        start_time = time.time()
-        sent_1 = self.send_data(self.socket, "setup")
-        bytes_recv2, setup_data = self.receive_data(self.socket)
+        # Setup phase
+        self._send_data(self.socket, "setup")
+        _, setup_data = self._receive_data(self.socket)
 
         self.pir.A = setup_data['A']
         self.client_hint = setup_data['client_hint']
-        setup_time = time.time() - start_time
 
-        query_start = time.time()
+        # Query phase
         state, query = self.pir.query(i, db_dims)
-
-        sent_2 = self.send_data(self.socket, "answer")
-        query_size = self.send_data(self.socket, query)
-        bytes_recv1, answer = self.receive_data(self.socket)
+        self._send_data(self.socket, "answer")
+        self._send_data(self.socket, query)
+        _, answer = self._receive_data(self.socket)
 
         result = self.pir.recover(
             state, self.client_hint, answer, self.pir.params)
 
-        # Check the actual value and try adjusting the result if we're off by 1
-        i_row, i_col = i // db_dims[0], i % db_dims[0]
-        # server_result = server.db[i_row, i_col]  # Note: This is just for testing
-        # if result != server_result and abs(result - server_result) == 1:
-        #     result = server_result
-
-        query_time = time.time() - query_start
-        total_time = setup_time + query_time
-        total_size = query_size + len(pickle.dumps(answer))
-        data_rate = total_size / total_time / 1024 / 1024  # MB/s
-
-        logging.info(f"Setup time: {setup_time:.2f}s")
-        logging.info(f"Query time: {query_time:.2f}s")
-        logging.info(f"Total time: {total_time:.2f}s")
-        logging.info(f"Data rate: {data_rate:.2f} MB/s")
-
-        return bytes_recv1 + bytes_recv2 + sent_1 + sent_2 + query_size, result
+        return result
 
     def close(self):
         """Close connection to server"""
-        self.send_data(self.socket, "quit")
+        self._send_data(self.socket, "quit")
+        self.stats.time_ended = time.time()
         self.socket.close()
+        self._log_stats()
 
-    def send_data(self, sock, data) -> int:
+    def _send_data(self, sock, data) -> None:
+        """Send data with size tracking"""
         serialized = pickle.dumps(data, protocol=4)
         size = len(serialized)
         sock.sendall(len(serialized).to_bytes(8, 'big'))
         sock.sendall(serialized)
-        return size
+        self.stats.bytes_sent += size + 8
 
-    def receive_data(self, sock):
+    def _receive_data(self, sock):
+        """Receive data with size tracking"""
         size = int.from_bytes(sock.recv(8), 'big')
         data = bytearray()
         while len(data) < size:
@@ -178,7 +185,21 @@ class PIRClient:
             if not packet:
                 raise ConnectionResetError()
             data.extend(packet)
+        self.stats.bytes_received += len(data) + 8
         return size, pickle.loads(bytes(data))
+
+    def _log_stats(self):
+        """Log network statistics"""
+        upload_rate, download_rate = self.stats.get_data_rate()
+        duration = self.stats.time_ended - self.stats.time_started
+        logging.info(f"""
+Connection Statistics:
+Duration: {duration:.2f} seconds
+Total Bytes Sent: {self.stats.bytes_sent}
+Total Bytes Received: {self.stats.bytes_received}
+Upload Rate: {upload_rate:.2f} bytes/second
+Download Rate: {download_rate:.2f} bytes/second
+""")
 
 
 if __name__ == "__main__":
@@ -195,7 +216,7 @@ if __name__ == "__main__":
 
     # Start server in a separate thread
     server = PIRServer()
-    N = 320 * 320  # Match the size from your logs
+    N = 320 * 320
     server.initialize_database(params, N)
 
     import threading
